@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Flight Simulator - Trees and Rivers</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: Arial, sans-serif;
+            color: white;
+        }
+        #hud {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            font-size: 16px;
+            background: rgba(0, 0, 0, 0.5);
+            padding: 10px;
+            border-radius: 5px;
+        }
+        #crash-message {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 30px;
+            background: rgba(255, 0, 0, 0.8);
+            padding: 20px;
+            border-radius: 10px;
+            display: none; /* Hidden by default */
+        }
+    </style>
+</head>
+<body>
+    <div id="hud">
+        <h3>Flight HUD</h3>
+        <p>Throttle: <span id="hud-throttle">50%</span></p>
+        <p>Speed: <span id="hud-speed">0</span> m/s</p>
+        <p>Altitude: <span id="hud-altitude">10</span> m</p>
+    </div>
+    <div id="crash-message">CRASH! Press 'R' to restart</div>
+
+    <script async src="https://unpkg.com/es-module-shims@1.3.6/dist/es-module-shims.js"></script>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.140.0/build/three.module.js"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { GLTFLoader } from 'https://unpkg.com/three@0.140.0/examples/jsm/loaders/GLTFLoader.js';
+
+        // Flight control variables
+        const keysPressed = { pitch: 0, roll: 0, yaw: 0 };
+        const aircraft = { throttle: 50, speed: 0, altitude: 10 };
+        let isCrashed = false;
+        let targetPitch = 0; // Target pitch for smoothing
+        let currentPitch = 0;
+        let totalPitchRotation = 0; // Store the total pitch rotation
+        let pitchIncrement = 0.05; // Adjust this value to change the pitch increment
+
+        function updateHUD() {
+            document.getElementById("hud-throttle").textContent = aircraft.throttle + "%";
+            document.getElementById("hud-speed").textContent = (aircraft.speed * 100).toFixed(1);
+            document.getElementById("hud-altitude").textContent = aircraft.altitude.toFixed(1);
+        }
+
+        function resetGame() {
+            isCrashed = false;
+            document.getElementById("crash-message").style.display = "none";
+            aircraft.throttle = 50;
+            aircraft.speed = 0;
+            aircraft.altitude = 10;
+            plane.position.set(0, 0, 0);
+            plane.rotation.set(0, Math.PI, 0); // Reset rotation to initial state, facing forward
+            targetPitch = 0;
+            currentPitch = 0;
+            totalPitchRotation = 0;
+            updateHUD();
+        }
+
+        // Key events
+        document.addEventListener('keydown', (e) => {
+            if (isCrashed) {
+                if (e.key === 'r' || e.key === 'R') {
+                    resetGame();
+                }
+                return;
+            }
+            switch (e.key) {
+                case 'ArrowUp': targetPitch = Math.max(targetPitch - pitchIncrement, -5); break; // Incrementally decrease targetPitch
+                case 'ArrowDown': targetPitch = Math.min(targetPitch + pitchIncrement, 5); break; // Incrementally increase targetPitch
+                case 'ArrowLeft': keysPressed.roll = -1; break;
+                case 'ArrowRight': keysPressed.roll = 1; break;
+                case 'w': case 'W': keysPressed.yaw = 1; break; // Inverted yaw controls
+                case 's': case 'S': keysPressed.yaw = -1; break; // Inverted yaw controls
+                case '+': case '=': aircraft.throttle = Math.min(aircraft.throttle + 5, 100); break;
+                case '-': case '_': aircraft.throttle = Math.max(aircraft.throttle - 5, 0); break;
+            }
+            updateHUD();
+        });
+
+        document.addEventListener('keyup', (e) => {
+            if (isCrashed) return;
+            if (["ArrowLeft", "ArrowRight"].includes(e.key)) keysPressed.roll = 0;
+            if (["w", "W", "s", "S"].includes(e.key)) keysPressed.yaw = 0;
+            updateHUD();
+        });
+
+        // THREE.js setup
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 10000);
+        const renderer = new THREE.WebGLRenderer();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.body.appendChild(renderer.domElement);
+
+        // Lights
+        const light = new THREE.DirectionalLight(0xffffff, 1);
+        light.position.set(50, 100, 50);
+        scene.add(light);
+
+        // Texture Loader
+        const textureLoader = new THREE.TextureLoader();
+
+        // Ground (Fixed)
+        const groundTexture = textureLoader.load('aerial_rocks_02_diff_4k.jpg');
+        groundTexture.wrapS = THREE.RepeatWrapping;
+        groundTexture.wrapT = THREE.RepeatWrapping;
+        groundTexture.repeat.set(10, 10); // Adjust repetition as needed
+
+        const ground = new THREE.Mesh(
+            new THREE.PlaneGeometry(5000, 5000, 64, 64),
+            new THREE.MeshStandardMaterial({ map: groundTexture })
+        );
+        ground.rotation.x = -Math.PI / 2;
+        ground.position.y = 0;
+        scene.add(ground);
+
+        function updateGround() {
+            ground.position.set(plane.position.x, 0, plane.position.z);
+        }
+
+        // Roads
+        const roadMaterial = new THREE.MeshStandardMaterial({ color: 0x666666 });
+        for (let i = 0; i < 10; i++) {
+            const road = new THREE.Mesh(
+                new THREE.PlaneGeometry(50, 500),
+                roadMaterial
+            );
+            road.rotation.x = -Math.PI / 2;
+            road.position.set(Math.random() * 4000 - 2000, 0.1, Math.random() * 4000 - 2000);
+            scene.add(road);
+        }
+
+        // Sky Sphere
+        const sky = new THREE.Mesh(
+            new THREE.SphereGeometry(5000, 32, 32),
+            new THREE.MeshBasicMaterial({ color: 0x87CEEB, side: THREE.BackSide })
+        );
+        scene.add(sky);
+
+        // Runway
+        const runwayTexture = textureLoader.load('a4844151-d924-4230-b334-1336f390aee1.jpg');
+        const runway = new THREE.Mesh(
+            new THREE.PlaneGeometry(80, 500),
+            new THREE.MeshStandardMaterial({ map: runwayTexture })
+        );
+        runway.rotation.x = -Math.PI / 2;
+        runway.position.set(0, 0.1, -250); // Changed Z-position to -250
+        scene.add(runway);
+
+        // Clouds (Stay Visible & Move Properly)
+        const clouds = [];
+        for (let i = 0; i < 15; i++) {
+            const cloud = new THREE.Mesh(
+                new THREE.SphereGeometry(Math.random() * 5 + 3, 8, 8),
+                new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.8 })
+            );
+            cloud.position.set(Math.random() * 1000 - 500, Math.random() * 200 + 50, Math.random() * 1000 - 500);
+            clouds.push(cloud);
+            scene.add(cloud);
+        }
+
+        function updateClouds() {
+            if (!plane) return;
+
+            const planeForward = new THREE.Vector3(0, 0, 1).applyQuaternion(plane.quaternion);
+            const cloudMovementVector = new THREE.Vector3();
+
+            clouds.forEach(cloud => {
+                // Calculate the relative speed of the clouds to the plane
+                // If the plane is moving forward, the clouds should appear to move backward
+                // If the plane is moving backward, the clouds should appear to move forward
+                // Use the plane's forward vector to determine the direction of cloud movement
+                cloudMovementVector.copy(planeForward).multiplyScalar(-aircraft.speed * 2);
+
+                // Move the clouds based on the calculated vector
+                cloud.position.add(cloudMovementVector);
+
+                // Reset cloud position when it goes too far behind the plane
+                const distanceToPlane = cloud.position.distanceTo(plane.position);
+                if (distanceToPlane > 1000) {
+                    // Move the cloud to the opposite side of the plane
+                    const directionToCloud = new THREE.Vector3().subVectors(cloud.position, plane.position).normalize();
+                    cloud.position.copy(plane.position).add(directionToCloud.multiplyScalar(-1000));
+                }
+            });
+        }
+        // Trees
+        const treeGeometry = new THREE.ConeGeometry(1, 3, 8);
+        const treeMaterial = new THREE.MeshStandardMaterial({ color: 0x228B22 });
+        const trees = [];
+        for (let i = 0; i < 100; i++) {
+            const tree = new THREE.Mesh(treeGeometry, treeMaterial);
+            tree.position.set(Math.random() * 4000 - 2000, 0, Math.random() * 4000 - 2000);
+            trees.push(tree);
+            scene.add(tree);
+        }
+
+        // Rivers
+        const riverGeometry = new THREE.PlaneGeometry(50, 1000);
+        const riverMaterial = new THREE.MeshStandardMaterial({ color: 0x0000ff, transparent: true, opacity: 0.7 });
+        const rivers = [];
+        for (let i = 0; i < 3; i++) {
+            const river = new THREE.Mesh(riverGeometry, riverMaterial);
+            river.rotation.x = -Math.PI / 2;
+            river.position.set(Math.random() * 4000 - 2000, 0.2, Math.random() * 4000 - 2000);
+            rivers.push(river);
+            scene.add(river);
+        }
+
+        // Load the plane model
+        let plane;
+        let leftAileron, rightAileron, elevator, rudder;
+        const loader = new GLTFLoader();
+        loader.load('f22_raptor.glb', (gltf) => {
+            plane = gltf.scene;
+            plane.scale.set(0.1, 0.1, 0.1);
+            scene.add(plane);
+            plane.position.set(0, 0, 0);
+            plane.rotation.y = Math.PI; // Initial rotation to face forward
+            plane.traverse((child) => {
+                if (child.isMesh) {
+                    child.material = new THREE.MeshStandardMaterial({
+                        roughness: 0.5,
+                        metalness: 0.8,
+                    });
+                }
+            });
+
+            // Find control surfaces by name (you might need to adjust these names based on your model)
+            leftAileron = plane.getObjectByName('Left_Aileron');
+            rightAileron = plane.getObjectByName('Right_Aileron');
+            elevator = plane.getObjectByName('Elevator');
+            rudder = plane.getObjectByName('RudderL_high_F22_0'); // Use only one rudder
+        });
+
+        // Chase Camera Setup
+        const chaseCameraOffset = new THREE.Vector3(0, 3, -15); // Changed offset
+        function updateChaseCamera() {
+            if (plane) {
+                const worldPosition = new THREE.Vector3();
+                plane.getWorldPosition(worldPosition);
+
+                const offset = chaseCameraOffset.clone();
+                offset.applyQuaternion(plane.quaternion);
+
+                // Position the camera relative to the plane
+                camera.position.copy(worldPosition).add(offset);
+
+                // Make the camera look at the plane's current position
+                camera.lookAt(plane.position);
+            }
+        }
+
+        // Flight Physics
+        function updatePhysics() {
+            if (!plane || isCrashed) return;
+
+            aircraft.speed = (aircraft.throttle / 100) * 0.5;
+
+            // Smooth pitch transition
+            keysPressed.pitch += (targetPitch - keysPressed.pitch) * 0.1;
+            currentPitch += (keysPressed.pitch - currentPitch) * 0.1;
+
+            // Calculate movement based on current rotation
+            const forwardVector = new THREE.Vector3(0, 0, 1).applyQuaternion(plane.quaternion);
+
+            // Apply pitch to the forward vector
+            const pitchAngle = currentPitch * 0.2; // Use currentPitch for visual and movement pitch
+            const pitchedForwardVector = new THREE.Vector3(
+                forwardVector.x,
+                Math.sin(pitchAngle), // Vertical component based on pitch
+                forwardVector.z
+            ).normalize();
+
+            // Move the plane based on the pitched forward vector
+            const movementDelta = pitchedForwardVector.multiplyScalar(aircraft.speed);
+            plane.position.add(movementDelta);
+
+            // Update altitude based on the plane's position
+            aircraft.altitude = plane.position.y;
+
+            // Update control surfaces
+            if (leftAileron && rightAileron) {
+                leftAileron.rotation.x = -keysPressed.roll * 0.2;
+                rightAileron.rotation.x = keysPressed.roll * 0.2;
+            }
+            if (elevator) {
+                elevator.rotation.y = keysPressed.pitch * 0.2;
+            }
+            if (rudder) {
+                rudder.rotation.y = keysPressed.yaw * 0.2;
+            }
+
+            // Update plane rotation
+            const worldXAxis = new THREE.Vector3(1, 0, 0);
+
+            // Calculate the difference in pitch rotation
+            const pitchDifference = pitchAngle - totalPitchRotation;
+
+            // Apply the difference in pitch rotation
+            plane.rotateOnWorldAxis(worldXAxis, pitchDifference);
+
+            // Update the total pitch rotation
+            totalPitchRotation = pitchAngle;
+
+            // Apply roll and yaw
+            plane.rotation.z += keysPressed.roll * 0.02; // Roll
+            plane.rotation.y += keysPressed.yaw * 0.02; // Yaw
+
+            // Clamp altitude to prevent going below ground
+            if (aircraft.altitude < 0) {
+                aircraft.altitude = 0;
+                plane.position.y = 0;
+                isCrashed = true;
+                document.getElementById("crash-message").style.display = "block";
+            }
+
+            updateGround();
+            updateClouds();
+            updateHUD();
+            updateChaseCamera();
+        }
+
+        function gameLoop() {
+            updatePhysics();
+            renderer.render(scene, camera);
+            requestAnimationFrame(gameLoop);
+        }
+
+        window.addEventListener('resize', () => {
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+        });
+
+        gameLoop();
+    </script>
+
+</body>
+</html>
