@@ -55,13 +55,12 @@
         import { GLTFLoader } from 'https://unpkg.com/three@0.140.0/examples/jsm/loaders/GLTFLoader.js';
 
         // Flight control variables
-        const keysPressed = { pitch: 0, roll: 0, yaw: 0 };
+        const keysPressed = { pitch: 0, roll: 0, yaw: 0 }; // Added pitch for direct control
         const aircraft = { throttle: 50, speed: 0, altitude: 10 };
         let isCrashed = false;
-        let targetPitch = 0; // Target pitch for smoothing
-        let currentPitch = 0;
-        let totalPitchRotation = 0; // Store the total pitch rotation
-        let pitchIncrement = 0.05; // Adjust this value to change the pitch increment
+        // Removed targetPitch, currentPitch, and pitchIncrement for direct pitch control
+        const pitchSpeed = 0.02; // Speed for pitch changes, similar to rotate.html
+        const rollSpeed = 0.02;  // Speed for roll changes
 
         function updateHUD() {
             document.getElementById("hud-throttle").textContent = aircraft.throttle + "%";
@@ -77,9 +76,7 @@
             aircraft.altitude = 10;
             plane.position.set(0, 0, 0);
             plane.rotation.set(0, Math.PI, 0); // Reset rotation to initial state, facing forward
-            targetPitch = 0;
-            currentPitch = 0;
-            totalPitchRotation = 0;
+            keysPressed.pitch = 0; // Reset pitch state
             updateHUD();
         }
 
@@ -92,8 +89,8 @@
                 return;
             }
             switch (e.key) {
-                case 'ArrowUp': targetPitch = Math.max(targetPitch - pitchIncrement, -5); break; // Incrementally decrease targetPitch
-                case 'ArrowDown': targetPitch = Math.min(targetPitch + pitchIncrement, 5); break; // Incrementally increase targetPitch
+                case 'ArrowUp': keysPressed.pitch = -1; break; // Nose up
+                case 'ArrowDown': keysPressed.pitch = 1; break; // Nose down
                 case 'ArrowLeft': keysPressed.roll = -1; break;
                 case 'ArrowRight': keysPressed.roll = 1; break;
                 case 'w': case 'W': keysPressed.yaw = 1; break; // Inverted yaw controls
@@ -106,6 +103,7 @@
 
         document.addEventListener('keyup', (e) => {
             if (isCrashed) return;
+            if (["ArrowUp", "ArrowDown"].includes(e.key)) keysPressed.pitch = 0;
             if (["ArrowLeft", "ArrowRight"].includes(e.key)) keysPressed.roll = 0;
             if (["w", "W", "s", "S"].includes(e.key)) keysPressed.yaw = 0;
             updateHUD();
@@ -266,8 +264,15 @@
                 const worldPosition = new THREE.Vector3();
                 plane.getWorldPosition(worldPosition);
 
+                // Create a quaternion representing only the plane's yaw.
+                // This will keep the camera positioned behind the plane based on its heading,
+                // but won't make the camera tilt up/down with the plane's pitch.
+                const yawEuler = new THREE.Euler(0, plane.rotation.y, 0); // Current accumulated yaw
+                const yawQuaternion = new THREE.Quaternion().setFromEuler(yawEuler);
+
                 const offset = chaseCameraOffset.clone();
-                offset.applyQuaternion(plane.quaternion);
+                // Apply only the yaw rotation to the camera's offset
+                offset.applyQuaternion(yawQuaternion);
 
                 // Position the camera relative to the plane
                 camera.position.copy(worldPosition).add(offset);
@@ -283,56 +288,38 @@
 
             aircraft.speed = (aircraft.throttle / 100) * 0.5;
 
-            // Smooth pitch transition
-            keysPressed.pitch += (targetPitch - keysPressed.pitch) * 0.1;
-            currentPitch += (keysPressed.pitch - currentPitch) * 0.1;
-
-            // Calculate movement based on current rotation
-            const forwardVector = new THREE.Vector3(0, 0, 1).applyQuaternion(plane.quaternion);
-
-            // Apply pitch to the forward vector
-            const pitchAngle = currentPitch * 0.2; // Use currentPitch for visual and movement pitch
-            const pitchedForwardVector = new THREE.Vector3(
-                forwardVector.x,
-                Math.sin(pitchAngle), // Vertical component based on pitch
-                forwardVector.z
-            ).normalize();
-
-            // Move the plane based on the pitched forward vector
-            const movementDelta = pitchedForwardVector.multiplyScalar(aircraft.speed);
-            plane.position.add(movementDelta);
-
-            // Update altitude based on the plane's position
-            aircraft.altitude = plane.position.y;
-
-            // Update control surfaces
+            // Update control surfaces with more pronounced elevator movement
+            // These animations reflect the inputs that will cause the rotation changes.
             if (leftAileron && rightAileron) {
-                leftAileron.rotation.x = -keysPressed.roll * 0.2;
-                rightAileron.rotation.x = keysPressed.roll * 0.2;
+                leftAileron.rotation.x = -keysPressed.roll * 0.2; // Standard aileron deflection
+                rightAileron.rotation.x = keysPressed.roll * 0.2;  // Standard aileron deflection
             }
             if (elevator) {
-                elevator.rotation.y = keysPressed.pitch * 0.2;
+                // Elevator deflection based on pitch input.
+                // Nose up (keysPressed.pitch = -1) means elevator trailing edge up (positive rotation around its X-axis).
+                // Nose down (keysPressed.pitch = 1) means elevator trailing edge down (negative rotation around its X-axis).
+                // This assumes the elevator model's pivot is along its local X-axis.
+                // The factor (e.g., 0.25) controls visual deflection sensitivity.
+                elevator.rotation.x = keysPressed.pitch * -0.25;
             }
             if (rudder) {
                 rudder.rotation.y = keysPressed.yaw * 0.2;
             }
 
-            // Update plane rotation
-            const worldXAxis = new THREE.Vector3(1, 0, 0);
+            // Apply pitch, roll, and yaw additively, similar to rotate.html for pitch/roll
+            plane.rotation.x += keysPressed.pitch * pitchSpeed; // Pitch
+            plane.rotation.z += keysPressed.roll * rollSpeed;   // Roll
+            plane.rotation.y += keysPressed.yaw * 0.02;         // Yaw (existing yaw speed)
 
-            // Calculate the difference in pitch rotation
-            const pitchDifference = pitchAngle - totalPitchRotation;
+            // Calculate movement based on the plane's NEW orientation for this frame.
+            // plane.quaternion is automatically updated from the .rotation changes.
+            const actualForwardDirection = new THREE.Vector3(0, 0, 1);
+            actualForwardDirection.applyQuaternion(plane.quaternion); 
+            const movementDelta = actualForwardDirection.multiplyScalar(aircraft.speed);
+            plane.position.add(movementDelta);
 
-            // Apply the difference in pitch rotation
-            plane.rotateOnWorldAxis(worldXAxis, pitchDifference);
-
-            // Update the total pitch rotation
-            totalPitchRotation = pitchAngle;
-
-            // Apply roll and yaw
-            plane.rotation.z += keysPressed.roll * 0.02; // Roll
-            plane.rotation.y += keysPressed.yaw * 0.02; // Yaw
-
+            // Update altitude based on the plane's actual y position after movement
+            aircraft.altitude = plane.position.y;
             // Clamp altitude to prevent going below ground
             if (aircraft.altitude < 0) {
                 aircraft.altitude = 0;
