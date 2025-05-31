@@ -121,6 +121,64 @@
         light.position.set(50, 100, 50);
         scene.add(light);
 
+        // Touch and Mouse Controls (Moved here after renderer initialization)
+        let isPointerDown = false;
+        let pointerStartX = 0;
+        let pointerStartY = 0;
+        const pointerThreshold = 30; // Minimum pixels to drag to activate control
+
+        renderer.domElement.addEventListener('pointerdown', (event) => {
+            if (isCrashed) return;
+            isPointerDown = true;
+            pointerStartX = event.clientX;
+            pointerStartY = event.clientY;
+            // Prevent default touch actions like scrolling
+            if (event.pointerType === 'touch') {
+                event.preventDefault();
+            }
+        });
+
+        renderer.domElement.addEventListener('pointermove', (event) => {
+            if (!isPointerDown || isCrashed) return;
+
+            const deltaX = event.clientX - pointerStartX;
+            const deltaY = event.clientY - pointerStartY;
+
+            // Pitch control (vertical drag)
+            if (deltaY > pointerThreshold) {
+                keysPressed.pitch = 1; // Nose down
+            } else if (deltaY < -pointerThreshold) {
+                keysPressed.pitch = -1; // Nose up
+            } else {
+                keysPressed.pitch = 0;
+            }
+
+            // Roll control (horizontal drag)
+            if (deltaX > pointerThreshold) {
+                keysPressed.roll = 1; // Roll right
+            } else if (deltaX < -pointerThreshold) {
+                keysPressed.roll = -1; // Roll left
+            } else {
+                keysPressed.roll = 0;
+            }
+            // Prevent default touch actions like scrolling
+            if (event.pointerType === 'touch') {
+                event.preventDefault();
+            }
+            // updateHUD(); // Optional: if you want immediate HUD update during drag
+        });
+
+        const onPointerUpOrLeave = (event) => {
+            if (!isPointerDown && event.type !== 'pointerleave' && !isCrashed) return; // Only act if pointer was down, or if it's a leave event
+            isPointerDown = false;
+            keysPressed.pitch = 0;
+            keysPressed.roll = 0;
+            // updateHUD(); // Optional: update HUD on release
+        };
+
+        renderer.domElement.addEventListener('pointerup', onPointerUpOrLeave);
+        renderer.domElement.addEventListener('pointerleave', onPointerUpOrLeave);
+
         // Texture Loader
         const textureLoader = new THREE.TextureLoader();
 
@@ -138,8 +196,28 @@
         ground.position.y = 0;
         scene.add(ground);
 
+        // Stores the plane's displacement from the last physics update.
+        // This is used by updateGround to scroll the ground texture.
+        let lastPlaneDisplacement = new THREE.Vector3();
+
         function updateGround() {
+            // Keep the ground geometry centered directly under the plane
             ground.position.set(plane.position.x, 0, plane.position.z);
+
+            // Adjust this factor to control the perceived speed of the ground.
+            // 1.0 = texture appears world-fixed, plane flies over it.
+            // >1.0 = texture scrolls faster, ground appears to rush by more quickly.
+            const groundScrollSpeedFactor = 2.0; 
+
+            // Calculate how many world units one full repeat of the texture covers
+            const worldUnitsPerTextureRepeatX = ground.geometry.parameters.width / groundTexture.repeat.x;
+            const worldUnitsPerTextureRepeatZ = ground.geometry.parameters.height / groundTexture.repeat.y;
+
+            // Update texture offset based on the plane's last displacement.
+            // The negative sign makes the texture scroll in the opposite direction of plane movement.
+            groundTexture.offset.x -= (lastPlaneDisplacement.x / worldUnitsPerTextureRepeatX) * groundScrollSpeedFactor;
+            groundTexture.offset.y -= (lastPlaneDisplacement.z / worldUnitsPerTextureRepeatZ) * groundScrollSpeedFactor;
+            // THREE.js handles the wrapping of texture offsets automatically when RepeatWrapping is enabled.
         }
 
         // Roads
